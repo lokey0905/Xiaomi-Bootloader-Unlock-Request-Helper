@@ -2,9 +2,8 @@ import subprocess
 import sys
 import time
 import os
-import webbrowser
 
-required_packages = ["browser-cookie3", "selenium", "pyperclip", "tkinter"]
+required_packages = ["selenium", "tkinter"]
 for package in required_packages:
     try:
         __import__(package.replace("-", "_"))
@@ -12,16 +11,14 @@ for package in required_packages:
         print(f"[!] Installing missing package: {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-import browser_cookie3
-import pyperclip
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import tkinter as tk
 from tkinter import ttk
 
-token_file = "token.txt" # dont change this 
+tokens_dir = "token"
 chrome_link = "https://c.mi.com/global" # dont change this 
-firefox_cmd = r'"C:\\Program Files\\Mozilla Firefox\\firefox.exe" %s' # edit this if you installed firefox to another location
+mi_id_cookie_keys = {"cuserid", "userid", "uid", "user_id", "miuid"}
 
 def show_taskbar_prompt(title, message, ok_text="OK"):
     root = tk.Tk()
@@ -51,94 +48,92 @@ def show_taskbar_prompt(title, message, ok_text="OK"):
     root.mainloop()
     return result["ok"]
 
-def extract_firefox_token():
-    try:
-        cj = browser_cookie3.firefox()
-        print(f"[i] Using Firefox profile from {cj.filename if hasattr(cj, 'filename') else 'default'}")
-    except Exception as e:
-        print(f"[!] Failed to load Firefox cookies: {e}")
-        return None
-    for cookie in cj:
-        if "new_bbs_serviceToken" in cookie.name:
-            return cookie.value
-    return None
-
-def extract_chrome_token(link):
+def extract_chrome_service_token_and_id(link, label):
     chrome_options = Options()
     chrome_options.add_argument("--start-maximized")
     driver = webdriver.Chrome(options=chrome_options)
     driver.get(link)
     show_taskbar_prompt(
-        "Login required - Chrome",
+        f"Login required - Chrome ({label})",
         "Please log in on c.mi.com/global in the opened Chrome window.\nPress OK after logging in. The login fields may be laggy for a few seconds."
     )
     try:
-        token = driver.execute_script("""
-            var match = document.cookie.match(/popRunToken=([^;]+)/);
-            return match ? match[1] : null;
-        """)
+        cookies = driver.get_cookies()
+        cookie_map = {c["name"].lower(): (c.get("value") or "") for c in cookies}
+        service_token = cookie_map.get("new_bbs_servicetoken")
+
+        mi_id = None
+        for key in mi_id_cookie_keys:
+            value = (cookie_map.get(key) or "").strip()
+            if value.isdigit():
+                mi_id = value
+                break
     except Exception as e:
-        print(f"[!] Error executing script in Chrome: {e}")
-        token = None
+        print(f"[!] Error reading Chrome cookies ({label}): {e}")
+        service_token = None
+        mi_id = None
     driver.quit()
-    if token:
-        print(f"[✔] Chrome Token found!")
+
+    if service_token:
+        print(f"[✔] Service token found in Chrome ({label})!")
     else:
-        print("[✖] Chrome Token not found!")
-    return token
+        print(f"[✖] Service token not found in Chrome ({label})!")
 
-def update_token_file(firefox_token, chrome_token):
+    if mi_id and not str(mi_id).isdigit():
+        mi_id = None
+    return service_token, mi_id
+
+def prompt_mi_id(default_value=None):
+    while True:
+        if default_value:
+            prompt = f"Enter Xiaomi ID for the token file name [{default_value}]: "
+        else:
+            prompt = "Enter Xiaomi ID for the token file name: "
+        mi_id = input(prompt).strip()
+        if not mi_id and default_value:
+            return default_value
+        if mi_id:
+            return mi_id
+        print("Xiaomi ID cannot be empty.")
+
+def update_token_file(token_a, token_b, file_name):
     lines = [
-        firefox_token or "N/A",
-        chrome_token or "N/A",
-        firefox_token or "N/A",
-        chrome_token or "N/A"
+        token_a or "N/A",
+        token_b or "N/A",
+        token_a or "N/A",
+        token_b or "N/A"
     ]
-    with open(token_file, "w", encoding="utf-8") as f:
+    os.makedirs(tokens_dir, exist_ok=True)
+    token_path = os.path.join(tokens_dir, f"{file_name}.txt")
+    with open(token_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print("[✔] token.txt updated with all tokens!")
-
-def prompt_login_firefox():
-    try:
-        webbrowser.get(firefox_cmd).open("https://c.mi.com/global")
-    except Exception:
-        webbrowser.open("https://c.mi.com/global")
-    show_taskbar_prompt(
-        "Login required - Firefox",
-        "Please log in on c.mi.com/global in the opened Firefox window.\nAfter you've finished logging in, press OK to continue."
-    )
-    kill_firefox()
-
-def kill_firefox(): #this is not a good solution but it adds a fallback whenever firefox cant be killed, too lazy to implement something better tbh - if having problems, modify it. Should work like this.
-     subprocess.run(["taskkill", "/IM", "firefox.exe"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-     time.sleep(1)
-     tasks = subprocess.run(["tasklist"], capture_output=True, text=True)
-     if "firefox.exe" in tasks.stdout:
-        subprocess.run(["taskkill", "/F", "/IM", "firefox.exe"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(3)    
-
+    print(f"[OK] Token file saved: {token_path}")
 
 if __name__ == "__main__":
     print("GetTokens V2 - by byBestix on xdaforums")
-    print("Input the script name here. Has changed in the past so im making it manual")
-    script_path = input()
-    prompt_login_firefox()
-    firefox_token = extract_firefox_token()
-    if not firefox_token:
-        print("[✖] Firefox token not found!")
+    token_a, mi_id_a = extract_chrome_service_token_and_id(chrome_link, "Account 1")
+    if not token_a:
+        print("[✖] Account 1 token not found!")
+    token_b, mi_id_b = extract_chrome_service_token_and_id(chrome_link, "Account 2")
+    if not token_b:
+        print("[✖] Account 2 token not found!")
+
+    if mi_id_a and mi_id_b:
+        if mi_id_a == mi_id_b:
+            file_name = mi_id_a
+            print(f"[OK] Xiaomi ID detected: {file_name}")
+        else:
+            file_name = f"{mi_id_a}_{mi_id_b}"
+            print(f"[OK] Xiaomi IDs detected: {mi_id_a}, {mi_id_b}")
+            print(f"[OK] Using file name: {file_name}.txt")
+    elif mi_id_a:
+        file_name = mi_id_a
+        print(f"[OK] Xiaomi ID detected: {file_name}")
+    elif mi_id_b:
+        file_name = mi_id_b
+        print(f"[OK] Xiaomi ID detected: {file_name}")
     else:
-        print("[✔] Firefox token extracted.")
-    chrome_token = extract_chrome_token(chrome_link)
-    if not chrome_token:
-        print("[✖] Chrome token not found!")
-    else:
-        print("[✔] Chrome token extracted.")
-    update_token_file(firefox_token, chrome_token)
-    for i in range(1, 5):
-        subprocess.Popen(
-            f'start cmd /k "echo {i} | py {script_path}"',
-            shell=True
-        )
-        time.sleep(0.1)
-    time.sleep(0.5)
-    quit
+        file_name = prompt_mi_id()
+
+    update_token_file(token_a, token_b, file_name)
+    print("Next step: run StartSend.py to launch request scripts.")

@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 import os
@@ -54,18 +55,61 @@ col_yb = Style.BRIGHT + Fore.YELLOW #bright yellow
 col_r = Fore.RED #red
 col_rb = Style.BRIGHT + Fore.RED #bright red
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Send unlock request for a specific token row.")
+    parser.add_argument("--token-file", default="token.txt", help="Path to token file.")
+    parser.add_argument("--timeshift-file", default="timeshift.txt", help="Path to timeshift file.")
+    parser.add_argument("--row", type=int, help="Token row number (1-based).")
+    parser.add_argument("--cols", type=int, help="Console width.")
+    parser.add_argument("--lines", type=int, help="Console height.")
+    return parser.parse_args()
+
+args = parse_args()
+token_file = args.token_file
+timeshift_file = args.timeshift_file
+
+def set_console_size(cols, lines):
+    if os.name == "nt" and cols and lines and cols > 0 and lines > 0:
+        os.system(f"mode con: cols={cols} lines={lines}")
+
+set_console_size(args.cols, args.lines)
+
+def get_mi_id_from_path(path_value):
+    base = os.path.basename(path_value)
+    mi_id, _ = os.path.splitext(base)
+    return mi_id or "unknown"
+
 # Version and token number
-token_number = int(input(col_g + f"[Token row number]: " + Fore.RESET))
+if args.row is None:
+    token_number = int(input(col_g + f"[Token row number]: " + Fore.RESET))
+else:
+    token_number = args.row
+
+if token_number <= 0:
+    print("[Error] Token row number must be >= 1.")
+    input("Press Enter to close...")
+    exit()
+
 os.system('cls' if os.name == 'nt' else 'clear')
 #token_number = 1
 scriptversion = "ARU_FHL_v070425"
 
 # Variables globales
 print(col_yb + f"{scriptversion}_token_#{token_number}:")
+print(col_y + f"Xiaomi ID: {get_mi_id_from_path(token_file)}" + Fore.RESET)
 print (col_y + f"Checking account status" + Fore.RESET)
-token = linecache.getline("token.txt" , token_number).strip ()
+token = linecache.getline(token_file, token_number).strip ()
+if not token:
+    print(f"[Error] Token not found at row {token_number} in {token_file}.")
+    input("Press Enter to close...")
+    exit()
 cookie_value = token
-feedtime = float(linecache.getline("timeshift.txt" , token_number).strip ())
+try:
+    feedtime = float(linecache.getline(timeshift_file , token_number).strip ())
+except ValueError:
+    print(f"[Error] Timeshift value not found at row {token_number} in {timeshift_file}.")
+    input("Press Enter to close...")
+    exit()
 feed_time_shift = feedtime
 feed_time_shift_1 = feed_time_shift / 1000
 
@@ -184,7 +228,7 @@ class HTTP11Session:
         self.http = urllib3.PoolManager(
             maxsize=10,
             retries=True,
-            timeout=urllib3.Timeout(connect=2.0, read=15.0),
+            timeout=urllib3.Timeout(connect=2.0, read=3.0),
             headers={}
         )
 
